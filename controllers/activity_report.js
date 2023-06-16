@@ -200,4 +200,107 @@ const getTable = async (req, res) => {
   }
 };
 
-export { getTotalHoras, getHorasPorTipo, getTable };
+const getTableWithTotal = async (req, res) => {
+  // Ruta para obtener la tabla de horas trabajadas y libres por día
+
+  try {
+    const year = parseInt(req.params.year);
+    const month = parseInt(req.params.month);
+
+    const startOfMonth = new Date(year, month - 1, 1);
+    const endOfMonth = new Date(year, month, 0);
+
+    const activities = await Activity.aggregate([
+      {
+        $match: {
+          fecha: { $gte: startOfMonth, $lte: endOfMonth },
+        },
+      },
+      {
+        $group: {
+          _id: {
+            fecha: {
+              $dateToString: {
+                format: "%Y-%m-%d",
+                date: "$fecha",
+              },
+            },
+          },
+          horas_trabajadas: {
+            $sum: {
+              $cond: [
+                { $eq: ["$tipo", "trabajo"] },
+                {
+                  $divide: [
+                    {
+                      $subtract: [
+                        { $toDate: "$hora_fin" },
+                        { $toDate: "$hora_inicio" },
+                      ],
+                    },
+                    1000 * 60 * 60,
+                  ],
+                },
+                0,
+              ],
+            },
+          },
+          horas_libres: {
+            $sum: {
+              $cond: [
+                { $eq: ["$tipo", "libre"] },
+                {
+                  $divide: [
+                    {
+                      $subtract: [
+                        { $toDate: "$hora_fin" },
+                        { $toDate: "$hora_inicio" },
+                      ],
+                    },
+                    1000 * 60 * 60,
+                  ],
+                },
+                0,
+              ],
+            },
+          },
+        },
+      },
+      {
+        $sort: { "_id.fecha": 1 },
+      },
+    ]);
+
+    const tabla = [];
+    let totalHorasTrabajadasMes = 0;
+    let totalHorasLibresMes = 0;
+    activities.forEach((activity) => {
+      const fecha = activity._id.fecha;
+      const total_horas_trabajadas =
+        activity.horas_trabajadas - activity.horas_libres;
+      tabla.push({
+        fecha,
+        horas_trabajadas: activity.horas_trabajadas,
+        horas_libres: activity.horas_libres,
+        total_horas_trabajadas,
+      });
+      totalHorasTrabajadasMes += activity.horas_trabajadas;
+      totalHorasLibresMes += activity.horas_libres;
+    });
+
+    const totalMes = {
+      horas_trabajadas: totalHorasTrabajadasMes,
+      horas_libres: totalHorasLibresMes,
+      total_horas_trabajadas: totalHorasTrabajadasMes - totalHorasLibresMes,
+    };
+
+    res.json({ tabla, totalMes });
+  } catch (error) {
+    console.error(error);
+    res
+      .status(500)
+      .json({ error: "Error al obtener la tabla de horas trabajadas" });
+  }
+};
+
+export { getTotalHoras, getHorasPorTipo, getTable, getTableWithTotal };
